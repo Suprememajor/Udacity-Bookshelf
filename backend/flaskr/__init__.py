@@ -1,25 +1,23 @@
-from flask import Flask, request, jsonify, abort
+from flask import Flask, request, abort, jsonify
+from flask_sqlalchemy import SQLAlchemy  # , or_
 from flask_cors import CORS
+import random
 
-from models import Book, setup_db, db
+from models import setup_db, Book
 
 BOOKS_PER_SHELF = 8
 
-
-# @TODO: General Instructions
-#   - As you're creating endpoints, define them and then search for 'TODO' within the frontend to update the endpoints there.
-#     If you do not update the endpoints, the lab will not work - of no fault of your API code!
-#   - Make sure for each route that you're thinking through when to abort and with which kind of error
-#   - If you change any of the response body keys, make sure you update the frontend to correspond.
 
 def paginate_books(request, selection):
     page = request.args.get("page", 1, type=int)
     start = (page - 1) * BOOKS_PER_SHELF
     end = start + BOOKS_PER_SHELF
+
     books = [book.format() for book in selection]
     current_books = books[start:end]
 
     return current_books
+
 
 def create_app(test_config=None):
     # create and configure the app
@@ -38,9 +36,9 @@ def create_app(test_config=None):
         )
         return response
 
-    @app.route('/books')
-    def get_books():
-        selection = Book.query.order_by(Book.rating.desc(), Book.title)
+    @app.route("/books")
+    def retrieve_books():
+        selection = Book.query.order_by(Book.id).all()
         current_books = paginate_books(request, selection)
 
         if len(current_books) == 0:
@@ -50,64 +48,92 @@ def create_app(test_config=None):
             {
                 "success": True,
                 "books": current_books,
-                "total_books": len(Book.query.all())
+                "total_books": len(Book.query.all()),
             }
         )
 
-    # TEST: When completed, the webpage will display books including title, author, and rating shown as stars
+    @app.route("/books/<int:book_id>", methods=["PATCH"])
+    def update_book(book_id):
 
-    @app.route('/books/<int:book_id>', methods=["PATCH"])
-    def edit_book_rating(book_id):
-        book = Book.query.get(book_id)
-        book.rating = request.json["rating"]
-        success = True
+        body = request.get_json()
 
         try:
-            db.session.commit()
+            book = Book.query.filter(Book.id == book_id).one_or_none()
+            if book is None:
+                abort(404)
+
+            if "rating" in body:
+                book.rating = int(body.get("rating"))
+
+            book.update()
+
+            return jsonify(
+                {
+                    "success": True,
+                }
+            )
+
         except:
-            success = False
-            db.session.rollback()
-        finally:
-            db.session.close()
+            abort(400)
 
-        return jsonify({"success": success})
-
-    @app.route('/books/<int:book_id>', methods=["DELETE"])
+    @app.route("/books/<int:book_id>", methods=["DELETE"])
     def delete_book(book_id):
-        book = Book.query.get(book_id)
-        success = True
+        try:
+            book = Book.query.filter(Book.id == book_id).one_or_none()
+
+            if book is None:
+                abort(404)
+
+            book.delete()
+            selection = Book.query.order_by(Book.id).all()
+            current_books = paginate_books(request, selection)
+
+            return jsonify(
+                {
+                    "success": True,
+                    "deleted": book_id,
+                    "books": current_books,
+                    "total_books": len(Book.query.all()),
+                }
+            )
+
+        except:
+            abort(422)
+
+    @app.route("/books", methods=["POST"])
+    def create_book():
+        body = request.get_json()
+
+        new_title = body.get("title", None)
+        new_author = body.get("author", None)
+        new_rating = body.get("rating", None)
 
         try:
-            db.session.delete(book)
-            db.session.commit()
+            book = Book(title=new_title, author=new_author, rating=new_rating)
+            book.insert()
+
+            selection = Book.query.order_by(Book.id).all()
+            current_books = paginate_books(request, selection)
+
+            return jsonify(
+                {
+                    "success": True,
+                    "created": book.id,
+                    "books": current_books,
+                    "total_books": len(Book.query.all()),
+                }
+            )
+
         except:
-            success = False
-            db.session.rollback()
-        finally:
-            db.session.close()
+            abort(422)
 
-        return jsonify({"success": success})
+    # @TODO: Review the above code for route handlers.
+    #        Pay special attention to the status codes used in the aborts since those are relevant for this task!
 
-    @app.route('/books', methods=["POST"])
-    def add_book():
-        response = dict()
-        book = Book(
-            title=request.json["title"],
-            author=request.json["author"],
-            rating=request.json["rating"]
-        )
-        response["success"] = True
+    # @TODO: Write error handler decorators to handle AT LEAST status codes 400, 404, and 422.
 
-        try:
-            db.session.add(book)
-            db.session.commit()
-            response["created"] = book.id
-        except:
-            response["success"] = False
-            db.session.rollback()
-        finally:
-            db.session.close()
-
-        return jsonify(response)
+    # TEST: Practice writing curl requests. Write some requests that you know will error in expected ways.
+    #       Make sure they are returning as expected. Do the same for other misformatted requests or requests missing data.
+    #       If you find any error responses returning as HTML, write new error handlers for them.
 
     return app
