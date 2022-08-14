@@ -103,27 +103,39 @@ def create_app(test_config=None):
 
     @app.route("/books", methods=["POST"])
     def create_book():
+        # curl http://127.0.0.1:5000/books -X POST -H "Content-Type: application/json" -d '{"search":"migrant"}'
         body = request.get_json()
 
+        search = body.get("search", None)
         new_title = body.get("title", None)
         new_author = body.get("author", None)
         new_rating = body.get("rating", None)
 
         try:
-            book = Book(title=new_title, author=new_author, rating=new_rating)
-            book.insert()
+            if search:
+                selection = Book.query.order_by(Book.id).filter(Book.title.ilike(f"%{search}%")).all()
+                current_books = paginate_books(request, selection)
+                return jsonify(
+                    {
+                        "success": True,
+                        "books": current_books,
+                        "total_books": len(selection)
+                    })
+            else:
+                book = Book(title=new_title, author=new_author, rating=new_rating)
+                book.insert()
 
-            selection = Book.query.order_by(Book.id).all()
-            current_books = paginate_books(request, selection)
+                selection = Book.query.order_by(Book.id).all()
+                current_books = paginate_books(request, selection)
 
-            return jsonify(
-                {
-                    "success": True,
-                    "created": book.id,
-                    "books": current_books,
-                    "total_books": len(Book.query.all()),
-                }
-            )
+                return jsonify(
+                    {
+                        "success": True,
+                        "created": book.id,
+                        "books": current_books,
+                        "total_books": len(Book.query.all()),
+                    }
+                )
 
         except:
             abort(422)
